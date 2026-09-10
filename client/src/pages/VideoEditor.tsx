@@ -395,6 +395,7 @@ export default function VideoEditor() {
     );
     const targetUrl = selectedVideoUrl || matchingUploaded?.url;
 
+    setRenderedOutput(null);
     setIsExportModalOpen(true);
 
     try {
@@ -403,6 +404,7 @@ export default function VideoEditor() {
         videoUrl: targetUrl,
         selectedTakes: currentSelectedTakes.map(t => ({
           id: t.id,
+          groupId: t.groupId,
           startTime: t.startTime,
           endTime: t.endTime,
           paddedStart: t.paddedStart,
