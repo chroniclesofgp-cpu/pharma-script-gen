@@ -771,3 +771,8 @@
 - [x] Upgrade VideoEditor frontend to use async export polling with step-by-step progress bar (e.g. "Encoding take 7 of 22")
 - [x] Eliminate HTTP gateway timeouts on multi-minute exports
 - [x] Verify test suite and save working checkpoint
+
+## Cloud Build Dockerfile Optimization & Active In-Flight CPU Fix — September 11, 2026
+- [x] Replace slow apt-get ffmpeg install in Dockerfile with instant static binary copy (mwader/static-ffmpeg:7.1) to prevent Cloud Build deployment timeout
+- [x] Keep render request in-flight so Cloud Run allocates 100% CPU to the container (preventing CPU freeze on detached background jobs)
+- [x] Verify test suite and save working checkpoint to trigger clean, fast deployment
