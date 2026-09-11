@@ -418,7 +418,12 @@ export default function VideoEditor() {
       setRenderedOutput(result);
     } catch (err: any) {
       setIsExportModalOpen(false);
-      toast.error(err.message || 'Failed to render video');
+      const msg = err.message || '';
+      if (msg.includes('Service Unavailable') || msg.includes('Unexpected token')) {
+        toast.error('The server was temporarily unavailable or timed out while rendering. Please try again.');
+      } else {
+        toast.error(msg.slice(0, 150) || 'Failed to render video');
+      }
     }
   };
 
