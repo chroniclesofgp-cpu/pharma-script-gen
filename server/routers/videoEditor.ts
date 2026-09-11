@@ -343,50 +343,30 @@ export const videoEditorRouter = router({
 
       try {
         const n = selectedTakes.length;
-        const bleedSec = (settings.audioBleedDurationMs / 1000).toFixed(2);
-
-        // Build fast-seek inputs (-ss before -i seeks in milliseconds instead of decoding whole file)
-        const inputArgs: string[] = [];
-        const vScales: string[] = [];
+        const takeFiles: string[] = [];
+        console.log(`[RenderVideo] Encoding ${n} takes sequentially for low-memory Cloud Run execution on ${sourcePath.slice(0, 80)}...`);
 
         for (let i = 0; i < n; i++) {
           const take = selectedTakes[i];
-          const startSec = Math.max(0, take.paddedStart || take.startTime);
+          const startSec = Math.max(0, take.paddedStart ?? take.startTime);
           const durSec = Math.max(0.5, take.duration || (take.paddedEnd - take.paddedStart));
+          const takeSlicePath = path.join(workDir, `slice_${i}.mp4`);
+          takeFiles.push(`file '${takeSlicePath}'`);
 
-          inputArgs.push(`-ss ${startSec.toFixed(3)} -t ${durSec.toFixed(3)} -i "${sourcePath}"`);
-        }
-
-        const filterElements: string[] = [];
-
-        // 1. Scale and reset timestamps for all video streams to vertical 9:16
-        for (let i = 0; i < n; i++) {
-          filterElements.push(
-            `[${i}:v]scale=${targetWidth}:${targetHeight}:force_original_aspect_ratio=decrease,pad=${targetWidth}:${targetHeight}:(ow-iw)/2:(oh-ih)/2,fps=${settings.fps},setpts=PTS-STARTPTS[v${i}]`
-          );
-        }
-
-        // 2. Prepare audio streams with clean timestamp resets and micro-fades
-        for (let i = 0; i < n; i++) {
-          const take = selectedTakes[i];
-          const durSec = Math.max(0.5, take.duration || (take.paddedEnd - take.paddedStart));
           const fadeOutStart = Math.max(0, durSec - 0.08).toFixed(3);
-          filterElements.push(
-            `[${i}:a]asetpts=PTS-STARTPTS,aresample=48000,afade=t=in:d=0.03,afade=t=out:st=${fadeOutStart}:d=0.08[a${i}]`
-          );
+          const vf = `scale=${targetWidth}:${targetHeight}:force_original_aspect_ratio=decrease,pad=${targetWidth}:${targetHeight}:(ow-iw)/2:(oh-ih)/2,fps=${settings.fps}`;
+          const af = `asetpts=PTS-STARTPTS,aresample=48000,afade=t=in:d=0.03,afade=t=out:st=${fadeOutStart}:d=0.08`;
+
+          const takeCmd = `ffmpeg -y -ss ${startSec.toFixed(3)} -t ${durSec.toFixed(3)} -i "${sourcePath}" -vf "${vf}" -af "${af}" -c:v libx264 -preset ultrafast -crf 23 -c:a aac -ar 48000 -b:a 128k "${takeSlicePath}"`;
+          await execAsync(takeCmd);
         }
 
-        // 3. Combined frame-locked audio and video concatenation
-        const avInputs = Array.from({ length: n }, (_, i) => `[v${i}][a${i}]`).join("");
-        filterElements.push(`${avInputs}concat=n=${n}:v=1:a=1[outv][outa]`);
+        const concatListPath = path.join(workDir, "concat_list.txt");
+        fs.writeFileSync(concatListPath, takeFiles.join("\n"), "utf-8");
 
-        // Separate filter elements by semicolon with NO trailing semicolon at end
-        const filterScriptContent = filterElements.join(";\n");
-        fs.writeFileSync(filterScriptPath, filterScriptContent);
-
-        console.log(`[RenderVideo] Running fast-seek render for ${n} takes on ${sourcePath.slice(0, 80)}...`);
-        const renderCmd = `ffmpeg -y ${inputArgs.join(" ")} -filter_complex_script "${filterScriptPath}" -map "[outv]" -map "[outa]" -c:v libx264 -preset ultrafast -crf 23 -c:a aac -ar 48000 -b:a 128k -movflags +faststart "${outputPath}"`;
-        await execAsync(renderCmd);
+        console.log(`[RenderVideo] Merging ${n} take slices losslessly into final 9:16 MP4...`);
+        const concatCmd = `ffmpeg -y -f concat -safe 0 -i "${concatListPath}" -c copy -movflags +faststart "${outputPath}"`;
+        await execAsync(concatCmd);
 
         const stat = fs.statSync(outputPath);
         const probeCmd = `ffprobe -v error -show_entries format=duration -of json "${outputPath}"`;

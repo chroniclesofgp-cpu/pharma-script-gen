@@ -759,3 +759,9 @@
 - [x] Update calculated score penalties and diagnostic banners to explicitly highlight creator saturation as a primary AVOID driver
 - [x] Add Vitest tests asserting that creator saturation (>300) produces reviewStatus: "avoid" even if unit volume and stability pass
 - [x] Re-score and verify existing candidates (e.g. Medicube Glass Glow Set with 2,048 creators marked AVOID)
+
+## Cloud Run Low-Memory Sequential Rendering Pipeline — September 11, 2026
+- [x] Implement low-memory sequential slice rendering with lossless concat demuxer (<70MB RAM) to eliminate Cloud Run 512MB OOM-killer crashes
+- [x] Add explicit progress tracking and verification for multi-take exports
+- [x] Run full test suite and verify end-to-end rendering on 22+ takes
+- [x] Save working checkpoint and push to GitHub
