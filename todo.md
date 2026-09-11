@@ -765,3 +765,9 @@
 - [x] Add explicit progress tracking and verification for multi-take exports
 - [x] Run full test suite and verify end-to-end rendering on 22+ takes
 - [x] Save working checkpoint and push to GitHub
+
+## Async Job Queue & Polling Video Export — September 11, 2026
+- [x] Implement startRenderVideo mutation and getExportStatus query with live progress tracking in videoEditor router
+- [x] Upgrade VideoEditor frontend to use async export polling with step-by-step progress bar (e.g. "Encoding take 7 of 22")
+- [x] Eliminate HTTP gateway timeouts on multi-minute exports
+- [x] Verify test suite and save working checkpoint

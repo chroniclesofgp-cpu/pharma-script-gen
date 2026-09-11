@@ -269,4 +269,48 @@ describe("videoEditor tRPC router tests", () => {
     expect(renderRes.durationSeconds).toBeGreaterThan(8);
     expect(renderRes.fileSizeBytes).toBeGreaterThan(100000);
   }, 60000);
+
+  it("starts an asynchronous render job and polls getExportStatus to completion", async () => {
+    const caller = appRouter.createCaller(createTestContext());
+
+    const { jobId, totalTakes } = await caller.videoEditor.startRenderVideo({
+      clipId: "IMG_7546",
+      selectedTakes: [
+        {
+          id: "take_hook",
+          startTime: 30.0,
+          endTime: 33.0,
+          paddedStart: 29.92,
+          paddedEnd: 33.12,
+          duration: 3.2,
+          text: "What to do about the bumps on your back and chest.",
+        },
+      ],
+      settings: {
+        audioBleedEnabled: false,
+        audioBleedDurationMs: 0,
+        leadInPaddingMs: 80,
+        leadOutPaddingMs: 120,
+        aspectRatio: "9:16",
+        resolution: "720p",
+        fps: 30,
+      },
+    });
+
+    expect(jobId).toMatch(/^job_/);
+    expect(totalTakes).toBe(1);
+
+    // Poll until completed
+    let status = await caller.videoEditor.getExportStatus({ jobId });
+    let attempts = 0;
+    while (status.status !== "completed" && attempts < 30) {
+      await new Promise(r => setTimeout(r, 500));
+      status = await caller.videoEditor.getExportStatus({ jobId });
+      attempts++;
+    }
+
+    expect(status.status).toBe("completed");
+    expect(status.result?.outputUrl).toMatch(/tiktok_cut_IMG_7546_|cloudfront\.net/);
+    expect(status.result?.fileSizeBytes).toBeGreaterThan(50000);
+  }, 30000);
 });

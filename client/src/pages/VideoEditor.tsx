@@ -68,6 +68,8 @@ export default function VideoEditor() {
   const sampleClipsQuery = trpc.videoEditor.getSampleClips.useQuery();
   const detectTakesMutation = trpc.videoEditor.detectTakes.useMutation();
   const renderVideoMutation = trpc.videoEditor.renderVideo.useMutation();
+  const startRenderVideoMutation = trpc.videoEditor.startRenderVideo.useMutation();
+  const trpcUtils = trpc.useUtils();
   const getUploadUrlMutation = trpc.videoEditor.getUploadUrl.useMutation();
 
   // Session persistence loader
@@ -92,6 +94,13 @@ export default function VideoEditor() {
   const [detectionResult, setDetectionResult] = useState<DetectionResult | null>(
     storedSession?.detectionResult || null
   );
+  const [exportJobState, setExportJobState] = useState<{
+    jobId: string;
+    progress: number;
+    currentTake: number;
+    totalTakes: number;
+    stepMessage: string;
+  } | null>(null);
   const [selectedTakeMap, setSelectedTakeMap] = useState<Record<string, string>>(
     storedSession?.selectedTakeMap || {}
   );
@@ -396,10 +405,17 @@ export default function VideoEditor() {
     const targetUrl = selectedVideoUrl || matchingUploaded?.url;
 
     setRenderedOutput(null);
+    setExportJobState({
+      jobId: '',
+      progress: 5,
+      currentTake: 0,
+      totalTakes: currentSelectedTakes.length,
+      stepMessage: 'Starting export job...',
+    });
     setIsExportModalOpen(true);
 
     try {
-      const result = await renderVideoMutation.mutateAsync({
+      const { jobId, totalTakes } = await startRenderVideoMutation.mutateAsync({
         clipId: selectedClipId,
         videoUrl: targetUrl,
         selectedTakes: currentSelectedTakes.map(t => ({
@@ -415,9 +431,43 @@ export default function VideoEditor() {
         settings,
       });
 
-      setRenderedOutput(result);
+      setExportJobState({
+        jobId,
+        progress: 8,
+        currentTake: 0,
+        totalTakes,
+        stepMessage: `Queued export for ${totalTakes} takes...`,
+      });
+
+      // Poll export status every 1.5 seconds
+      const pollInterval = setInterval(async () => {
+        try {
+          const statusRes = await trpcUtils.videoEditor.getExportStatus.fetch({ jobId });
+          if (statusRes.status === 'processing' || statusRes.status === 'queued') {
+            setExportJobState({
+              jobId,
+              progress: statusRes.progress || 10,
+              currentTake: statusRes.currentTake || 0,
+              totalTakes: statusRes.totalTakes || totalTakes,
+              stepMessage: statusRes.stepMessage || 'Processing takes...',
+            });
+          } else if (statusRes.status === 'completed' && statusRes.result) {
+            clearInterval(pollInterval);
+            setExportJobState(null);
+            setRenderedOutput(statusRes.result);
+          } else if (statusRes.status === 'error') {
+            clearInterval(pollInterval);
+            setIsExportModalOpen(false);
+            setExportJobState(null);
+            toast.error(statusRes.error || 'Export failed');
+          }
+        } catch (pollErr) {
+          console.warn('Poll error:', pollErr);
+        }
+      }, 1500);
     } catch (err: any) {
       setIsExportModalOpen(false);
+      setExportJobState(null);
       const msg = err.message || '';
       if (msg.includes('Service Unavailable') || msg.includes('Unexpected token')) {
         toast.error('The server was temporarily unavailable or timed out while rendering. Please try again.');
@@ -1020,13 +1070,13 @@ export default function VideoEditor() {
               {/* Render action button */}
               <Button
                 onClick={handleRender}
-                disabled={renderVideoMutation.isPending || currentSelectedTakes.length === 0}
+                disabled={startRenderVideoMutation.isPending || !!exportJobState || currentSelectedTakes.length === 0}
                 className="bg-teal-500 hover:bg-teal-400 text-black font-semibold text-xs h-9 px-4 shadow-lg shadow-teal-500/20"
               >
-                {renderVideoMutation.isPending ? (
+                {startRenderVideoMutation.isPending || exportJobState ? (
                   <span className="flex items-center gap-2">
                     <RotateCcw className="w-3.5 h-3.5 animate-spin" />
-                    Rendering TikTok MP4...
+                    Exporting Video...
                   </span>
                 ) : (
                   <span className="flex items-center gap-2">
@@ -1131,19 +1181,29 @@ export default function VideoEditor() {
       {/* ── Export & Preview Modal ─────────────────────────────────────────── */}
       <Dialog open={isExportModalOpen} onOpenChange={setIsExportModalOpen}>
         <DialogContent className="bg-[#0c1222] border-white/10 text-white max-w-xl max-h-[90vh] overflow-y-auto">
-          {renderVideoMutation.isPending ? (
+          {(startRenderVideoMutation.isPending || exportJobState) && !renderedOutput ? (
             <div className="py-8 flex flex-col items-center justify-center text-center space-y-5">
               <div className="relative">
                 <div className="w-16 h-16 rounded-full border-2 border-teal-500/20 border-t-teal-400 animate-spin" />
                 <Sparkles className="w-6 h-6 text-teal-400 absolute inset-0 m-auto" />
               </div>
-              <div className="space-y-1.5">
+              <div className="space-y-1.5 w-full max-w-sm">
                 <h3 className="text-base font-bold text-white tracking-tight">
                   Assembling TikTok 9:16 Video
                 </h3>
-                <p className="text-xs text-white/50">
-                  Single-pass FFmpeg trim & audio bleed in progress...
+                <p className="text-xs text-teal-300 font-medium">
+                  {exportJobState?.stepMessage || 'Processing takes...'}
                 </p>
+                <div className="w-full bg-white/10 rounded-full h-2 mt-2 overflow-hidden">
+                  <div
+                    className="bg-gradient-to-r from-teal-500 to-emerald-400 h-full transition-all duration-300"
+                    style={{ width: `${exportJobState?.progress || 10}%` }}
+                  />
+                </div>
+                <div className="flex justify-between text-[10px] text-white/40 pt-1">
+                  <span>Take {exportJobState?.currentTake || 0} of {exportJobState?.totalTakes || currentSelectedTakes.length}</span>
+                  <span>{exportJobState?.progress || 5}% Complete</span>
+                </div>
               </div>
 
               <div className="w-full max-w-sm bg-white/5 rounded-lg p-3 text-left space-y-2 border border-white/5 text-xs text-white/70">
@@ -1158,10 +1218,6 @@ export default function VideoEditor() {
                 <div className="flex items-center gap-2 text-teal-300">
                   <Check className="w-3.5 h-3.5" />
                   <span>{settings.audioBleedEnabled ? `${settings.audioBleedDurationMs}ms audio bleed enabled` : 'Zero-gap jump cuts'}</span>
-                </div>
-                <div className="flex items-center gap-2 text-teal-400 animate-pulse">
-                  <RotateCcw className="w-3.5 h-3.5 animate-spin" />
-                  <span>Encoding vertical 9:16 MP4 on cloud...</span>
                 </div>
               </div>
             </div>
