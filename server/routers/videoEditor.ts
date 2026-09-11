@@ -359,29 +359,26 @@ export const videoEditorRouter = router({
 
         const filterElements: string[] = [];
 
-        // 1. Scale all video streams to vertical 9:16
+        // 1. Scale and reset timestamps for all video streams to vertical 9:16
         for (let i = 0; i < n; i++) {
           filterElements.push(
-            `[${i}:v]scale=${targetWidth}:${targetHeight}:force_original_aspect_ratio=decrease,pad=${targetWidth}:${targetHeight}:(ow-iw)/2:(oh-ih)/2,fps=${settings.fps}[v${i}]`
+            `[${i}:v]scale=${targetWidth}:${targetHeight}:force_original_aspect_ratio=decrease,pad=${targetWidth}:${targetHeight}:(ow-iw)/2:(oh-ih)/2,fps=${settings.fps},setpts=PTS-STARTPTS[v${i}]`
           );
         }
 
-        // 2. Video concatenation
-        const vInputs = Array.from({ length: n }, (_, i) => `[v${i}]`).join("");
-        filterElements.push(`${vInputs}concat=n=${n}:v=1:a=0[outv]`);
-
-        // 3. Audio concatenation or acrossfade bleed
-        if (!settings.audioBleedEnabled || settings.audioBleedDurationMs <= 0 || n === 1) {
-          const aInputs = Array.from({ length: n }, (_, i) => `[${i}:a]`).join("");
-          filterElements.push(`${aInputs}concat=n=${n}:v=0:a=1[outa]`);
-        } else {
-          let lastAudio = "[0:a]";
-          for (let i = 1; i < n; i++) {
-            const nextAudio = i === n - 1 ? "[outa]" : `[aud${i}]`;
-            filterElements.push(`${lastAudio}[${i}:a]acrossfade=d=${bleedSec}:c1=tri:c2=tri${nextAudio}`);
-            lastAudio = nextAudio;
-          }
+        // 2. Prepare audio streams with clean timestamp resets and micro-fades
+        for (let i = 0; i < n; i++) {
+          const take = selectedTakes[i];
+          const durSec = Math.max(0.5, take.duration || (take.paddedEnd - take.paddedStart));
+          const fadeOutStart = Math.max(0, durSec - 0.08).toFixed(3);
+          filterElements.push(
+            `[${i}:a]asetpts=PTS-STARTPTS,aresample=48000,afade=t=in:d=0.03,afade=t=out:st=${fadeOutStart}:d=0.08[a${i}]`
+          );
         }
+
+        // 3. Combined frame-locked audio and video concatenation
+        const avInputs = Array.from({ length: n }, (_, i) => `[v${i}][a${i}]`).join("");
+        filterElements.push(`${avInputs}concat=n=${n}:v=1:a=1[outv][outa]`);
 
         // Separate filter elements by semicolon with NO trailing semicolon at end
         const filterScriptContent = filterElements.join(";\n");
